@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  # Core AI SOC Agent
+  ai-soc-agent:
+    build: .
+    container_name: ai-soc-agent
+    ports:
+      - "8000:8000"
+      - "8001:8001"  # WebSocket
+    environment:
+      - DATABASE_URL=postgresql://soc_user:soc_pass@postgres:5432/soc_db
+      - REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SNORT_LOG_PATH=/var/log/snort
+      - ZEEK_LOG_PATH=/var/log/zeek
+    volumes:
+      - ./logs:/var/log
+      - ./models:/app/models
+      - ./config:/app/config
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - soc-network
+
+  # Database
+  postgres:
+    image: postgres:14
+    container_name: soc-postgres
+    environment:
+      - POSTGRES_DB=soc_db
+      - POSTGRES_USER=soc_user
+      - POSTGRES_PASSWORD=soc_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - soc-network
+
+  # Redis for caching and queuing
+  redis:
+    image: redis:7-alpine
+    container_name: soc-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - soc-network
+
+  # Elasticsearch for log storage and SIEM
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: soc-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - soc-network
+
+  # Kibana for visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: soc-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - soc-network
+
+  # Logstash for log processing
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.8.0
+    container_name: soc-logstash
+    volumes:
+      - ./logstash/config:/usr/share/logstash/pipeline
+      - ./logs:/var/log/input
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    depends_on:
+      - elasticsearch
+    networks:
+      - soc-network
+
+  # Snort IDS
+  snort:
+    image: ciscotalos/snort3
+    container_name: soc-snort
+    network_mode: host
+    volumes:
+      - ./snort/config:/usr/local/etc/snort
+      - ./logs/snort:/var/log/snort
+    command: >
+      snort -c /usr/local/etc/snort/snort.conf
+      -i eth0 -A alert_fast -l /var/log/snort
+
+  # Zeek Network Analysis
+  zeek:
+    image: zeek/zeek:latest
+    container_name: soc-zeek
+    network_mode: host
+    volumes:
+      - ./zeek/config:/usr/local/zeek/etc
+      - ./logs/zeek:/usr/local/zeek/logs
+    command: >
+      zeek -i eth0 local
+
+  # ML Model Training Service
+  ml-trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: soc-ml-trainer
+    environment:
+      - DATABASE_URL=postgresql://soc_user:soc_pass@postgres:5432/soc_db
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./models:/app/models
+      - ./training_data:/app/training_data
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - soc-network
+
+  # Web Dashboard
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: soc-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8001
+    networks:
+      - soc-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+
+networks:
+  soc-network:
+    driver: bridge
