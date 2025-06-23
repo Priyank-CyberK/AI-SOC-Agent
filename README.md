@@ -15,7 +15,7 @@ This project implements a production-ready AI-powered Security Operations Center
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Data Sources  │    │   AI Engine     │    │   Response      │
 │                 │    │                 │    │   Systems       │
-│ • Snort/Zeek    │───▶│ • ML Models     │───▶│ • Firewall APIs │
+│ • Snort/Zeek    │──▶ │ • ML Models     │──▶│ • Firewall APIs │
 │ • Network Logs  │    │ • LLM Analysis  │    │ • SIEM Updates  │
 │ • SIEM Data     │    │ • RL Agent      │    │ • Auto Response │
 │ • Threat Intel  │    │ • Decision Tree │    │ • Notifications │
